@@ -1,5 +1,6 @@
 import json
 import os
+from datetime import datetime
 import mysql.connector
 
 class DatabaseConfig:
@@ -38,6 +39,7 @@ class SqlConnector:
         self.password = password
         self.database = database
         self.connection = None
+        self.cursor = None
         
     def connect_to_database(self):
         try:
@@ -47,6 +49,7 @@ class SqlConnector:
                 password = self.password,
                 database = self.database,
                 )
+            self.cursor = self.connection.cursor()
             print("Connected to MySQL database successfully.")
         except mysql.connector.Error as mistake:
             print(f"Error: {mistake}")
@@ -62,13 +65,12 @@ class SqlConnector:
 
     def create_table(self, table_name, columns, foreign_keys=None):
         try:
-            cursor = self.connection.cursor()
             # Construct the CREATE TABLE statement with IF NOT EXISTS clause
             create_table_query = f"CREATE TABLE IF NOT EXISTS {table_name} ({', '.join(columns)}"
             if foreign_keys:
                 create_table_query += f", {', '.join(foreign_keys)}"
             create_table_query += ")"
-            cursor.execute(create_table_query)
+            self.cursor.execute(create_table_query)
             self.connection.commit()
             print(f"Table '{table_name}' created or already exists.")
         except mysql.connector.Error as error:
@@ -76,25 +78,22 @@ class SqlConnector:
             
     def create_database(self, database_name):
         try:
-            cursor = self.connection.cursor()
             # Execute the SQL query to create the database
-            cursor.execute(f"CREATE DATABASE IF NOT EXISTS {database_name}")
+            self.cursor.execute(f"CREATE DATABASE IF NOT EXISTS {database_name}")
             print(f"Database '{database_name}' created or already exists.")
-            cursor.close()
+            self.cursor.close()
         except mysql.connector.Error as error:
             print(f"Error: {error}")
             
     def insert_data(self, table_name, data):
         try:
-            cursor = self.connection.cursor()
-
             # Construct the INSERT INTO statement
             columns = ', '.join(data.keys())
             values_template = ', '.join(['%s'] * len(data))
             insert_query = f"INSERT INTO {table_name} ({columns}) VALUES ({values_template})"
 
             # Execute the query with data values
-            cursor.execute(insert_query, list(data.values()))
+            self.cursor.execute(insert_query, list(data.values()))
 
             # Commit the transaction
             self.connection.commit()
@@ -104,11 +103,9 @@ class SqlConnector:
             
     def insert_default_kind_values(self):
         try:
-            cursor = self.connection.cursor()
-
             # Check if KIND table is empty
-            cursor.execute("SELECT COUNT(*) FROM KIND")
-            count = cursor.fetchone()[0]
+            self.cursor.execute("SELECT COUNT(*) FROM KIND")
+            count = self.cursor.fetchone()[0]
 
             if count == 0:
                 # Define default values for KIND table
@@ -122,7 +119,7 @@ class SqlConnector:
                 insert_query = "INSERT INTO KIND (ID, DESCRIPTION) VALUES (%s, %s)"
 
                 # Execute the query for each default value
-                cursor.executemany(insert_query, default_values)
+                self.cursor.executemany(insert_query, default_values)
 
                 # Commit the transaction
                 self.connection.commit()
@@ -134,11 +131,9 @@ class SqlConnector:
 
     def insert_default_category_values(self):
         try:
-            cursor = self.connection.cursor()
-
             # Check if CATEGORY table is empty
-            cursor.execute("SELECT COUNT(*) FROM CATEGORY")
-            count = cursor.fetchone()[0]
+            self.cursor.execute("SELECT COUNT(*) FROM CATEGORY")
+            count = self.cursor.fetchone()[0]
 
             if count == 0:
                 # Define default values for CATEGORY table
@@ -157,7 +152,7 @@ class SqlConnector:
                 insert_query = "INSERT INTO CATEGORY (ID, DESCRIPTION, KINDID) VALUES (%s, %s, %s)"
 
                 # Execute the query for each default value
-                cursor.executemany(insert_query, default_values)
+                self.cursor.executemany(insert_query, default_values)
 
                 # Commit the transaction
                 self.connection.commit()
@@ -168,12 +163,14 @@ class SqlConnector:
             print(f"Error: {error}")
             
 class Menu:
-    def __init__(self):
+    def __init__(self,cursor):
         self.running = True
+        self.cursor = cursor # Store the cursror as an instance variable.
 
     def display_menu(self):
         print("Menu:")
-        print("1. Configuration")
+        print("1. Add Transaction")
+        print("2. Configuration")
         print("0. Exit")
 
     def handle_input(self):
@@ -182,11 +179,104 @@ class Menu:
             choice = input("Enter your choice: ")
 
             if choice == "1":
+                self.add_transaction()
+            elif choice == "2":
                 self.configure_submenu()
             elif choice == "0":
                 self.exit_program()
             else:
                 print("Invalid choice. Please try again.")
+
+    def add_transaction(self):
+        kind_choice= self.select_kind()
+        category_choice = self.select_category(kind_choice)
+        transaction_date= self.get_transaction_date()
+        transaction_value = self.transaction_value()
+        comments = self.get_comments()
+
+        transaction_data ={
+            "KINDID": kind_choice,
+            "CATEGORYID": category_choice,
+            "DATE": transaction_date,
+            "VALUE": transaction_value,
+            "COMMENTS": comments
+        }
+        sql_connector.insert_data("TRANSACTIONS", transaction_data)
+        print("Transaction added successfully")
+
+
+    def get_comments(self):
+        while True:
+            comments = input("Enter any comments (press Enter to skip): ")
+            if comments.strip() == "":
+                return None  # Return None if the user skips entering comments
+            else:
+                return comments  # Return the comments entered by the user
+        
+    def select_kind(self):    
+        print("Select Transaction Type:")
+        try:
+            self.cursor.execute("SELECT ID, DESCRIPTION FROM KIND")
+            kinds = self.cursor.fetchall()
+            for kind in kinds:
+                print(f"{kind[0]}. {kind[1]}")
+            kind_choice = input("Enter your choice:")
+            return kind_choice
+        except mysql.connector.Error as error:
+            print(f"Error: {error}")
+
+    def select_category(self, kind_choice):
+        print("Select Category Type:")
+        try:
+            self.cursor.execute(f"SELECT * FROM CATEGORY WHERE KINDID = {kind_choice}")
+            categories = self.cursor.fetchall()
+            if categories:
+                category_mapping = {}  # Create an empty dictionary to store the mapping
+                # Initialize a counter variable
+                counter = 1
+                for category in categories:
+                    print(f"{counter}. {category[1]}")  # Display the counter along with the category description
+                    category_mapping[counter] = category[0]  # Map the counter to the actual category ID
+                    counter += 1  # Increment the counter
+            else:
+                print("No categories found for the selected kind.")
+        except mysql.connector.Error as error:
+            print(f"Error: {error}")
+    
+        while True:
+            category_choice_input = input("Enter your choice: ")
+            try:
+                category_choice = int(category_choice_input)
+                if category_choice in category_mapping:
+                    return category_mapping[category_choice]  # Return the actual category ID
+                else:
+                    print("Invalid choice. Please enter a valid number.")
+            except ValueError:
+                print("Invalid input. Please enter a number.")
+
+    def transaction_value(self):
+        while True:
+            value_str = input("Enter the value of the transaction (e.g., 12.34): ")
+            try:
+                # Try to convert the input string to a float
+                value = float(value_str)
+                # Check if the value has exactly two decimal places
+                if round(value, 2) == value:
+                    return value  # Return the value if it's valid
+                else:
+                    print("Please enter a value with exactly two decimal places.")
+            except ValueError:
+                print("Please enter a valid number.")
+
+    def get_transaction_date(self):
+        while True:
+            date_str = input("Enter the date of the transaction (DD-MM-YYYY): ")
+            try:
+            # Try to parse the input string as a date with the specified format
+                transaction_date = datetime.strptime(date_str, "%d-%m-%Y").date()
+                return transaction_date  # Return the parsed date if successful
+            except ValueError:
+                print("Please enter a date in the format DD-MM-YYYY.")
 
     def configure_submenu(self):
         submenu_running = True
@@ -288,6 +378,6 @@ sql_connector.insert_default_category_values()
 
 
 # Create an instance of the menu
-menu = Menu()
+menu = Menu(sql_connector.cursor)
 # Start the menu loop
 menu.handle_input()
