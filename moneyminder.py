@@ -56,6 +56,117 @@ class SqlConnector:
             self.connection.close()
             print("Disconnected from MySQL database.")
             
+    def create_tables(self, tables):
+        for table_name, (columns, foreign_keys) in tables.items():
+            self.create_table(table_name, columns, foreign_keys)
+
+    def create_table(self, table_name, columns, foreign_keys=None):
+        try:
+            cursor = self.connection.cursor()
+            # Construct the CREATE TABLE statement with IF NOT EXISTS clause
+            create_table_query = f"CREATE TABLE IF NOT EXISTS {table_name} ({', '.join(columns)}"
+            if foreign_keys:
+                create_table_query += f", {', '.join(foreign_keys)}"
+            create_table_query += ")"
+            cursor.execute(create_table_query)
+            self.connection.commit()
+            print(f"Table '{table_name}' created or already exists.")
+        except mysql.connector.Error as error:
+            print(f"Error: {error}")
+            
+    def create_database(self, database_name):
+        try:
+            cursor = self.connection.cursor()
+            # Execute the SQL query to create the database
+            cursor.execute(f"CREATE DATABASE IF NOT EXISTS {database_name}")
+            print(f"Database '{database_name}' created or already exists.")
+            cursor.close()
+        except mysql.connector.Error as error:
+            print(f"Error: {error}")
+            
+    def insert_data(self, table_name, data):
+        try:
+            cursor = self.connection.cursor()
+
+            # Construct the INSERT INTO statement
+            columns = ', '.join(data.keys())
+            values_template = ', '.join(['%s'] * len(data))
+            insert_query = f"INSERT INTO {table_name} ({columns}) VALUES ({values_template})"
+
+            # Execute the query with data values
+            cursor.execute(insert_query, list(data.values()))
+
+            # Commit the transaction
+            self.connection.commit()
+            print(f"Data inserted into '{table_name}' successfully.")
+        except mysql.connector.Error as error:
+            print(f"Error: {error}")
+            
+    def insert_default_kind_values(self):
+        try:
+            cursor = self.connection.cursor()
+
+            # Check if KIND table is empty
+            cursor.execute("SELECT COUNT(*) FROM KIND")
+            count = cursor.fetchone()[0]
+
+            if count == 0:
+                # Define default values for KIND table
+                default_values = [
+                    ('1', 'Revenue'),
+                    ('2', 'Expenses')
+                    # Add more default values as needed
+                ]
+
+                # Construct the INSERT INTO statement
+                insert_query = "INSERT INTO KIND (ID, DESCRIPTION) VALUES (%s, %s)"
+
+                # Execute the query for each default value
+                cursor.executemany(insert_query, default_values)
+
+                # Commit the transaction
+                self.connection.commit()
+                print("Default values inserted into 'KIND' table successfully.")
+            else:
+                print("Default values already exist in 'KIND' table.")
+        except mysql.connector.Error as error:
+            print(f"Error: {error}")
+
+    def insert_default_category_values(self):
+        try:
+            cursor = self.connection.cursor()
+
+            # Check if CATEGORY table is empty
+            cursor.execute("SELECT COUNT(*) FROM CATEGORY")
+            count = cursor.fetchone()[0]
+
+            if count == 0:
+                # Define default values for CATEGORY table
+                default_values = [
+                    ('1', 'Salary', '1'),  # Assuming KIND ID 0 is default
+                    ('2', 'Other', '1'),
+                    ('3', 'Going Out', '2'),   # Assuming KIND ID 1 is default
+                    ('4', 'Smoking', '2'),
+                    ('5', 'Shopping', '2'),
+                    ('6', 'Vehicles and gas', '2'),
+                    ('7', 'Other', '2')
+                    # Add more default values as needed
+                ]
+
+                # Construct the INSERT INTO statement
+                insert_query = "INSERT INTO CATEGORY (ID, DESCRIPTION, KINDID) VALUES (%s, %s, %s)"
+
+                # Execute the query for each default value
+                cursor.executemany(insert_query, default_values)
+
+                # Commit the transaction
+                self.connection.commit()
+                print("Default values inserted into 'CATEGORY' table successfully.")
+            else:
+                print("Default values already exist in 'CATEGORY' table.")
+        except mysql.connector.Error as error:
+            print(f"Error: {error}")
+            
 class Menu:
     def __init__(self):
         self.running = True
@@ -138,11 +249,43 @@ db_config = DatabaseConfig(configuration)
 data = db_config.load_json()
 
 # Testing Connection
-sql_connector = SqlConnector(data['host'], data['user'], data['password'])
+test_sql_connector = SqlConnector(data['host'], data['user'], data['password'])
 # Connect to the MySQL database
-sql_connector.connect_to_database()
+test_sql_connector.connect_to_database()
+test_sql_connector.create_database(data['database'])
 # Disconnect from the MySQL
-sql_connector.disconnect()
+test_sql_connector.disconnect()
+
+sql_connector = SqlConnector(data['host'], data['user'], data['password'], data['database'])
+sql_connector.connect_to_database()
+# Define tables with columns and foreign keys
+tables = {
+    "KIND": ([
+        "ID INTEGER PRIMARY KEY AUTO_INCREMENT",
+        "DESCRIPTION VARCHAR(50)"
+    ], None),
+    "CATEGORY": ([
+        "ID INTEGER PRIMARY KEY AUTO_INCREMENT",
+        "DESCRIPTION VARCHAR(50)",
+        "KINDID INTEGER",
+        "FOREIGN KEY (KINDID) REFERENCES KIND(ID)"
+    ], None),
+    "TRANSACTIONS": ([
+        "ID INTEGER PRIMARY KEY AUTO_INCREMENT",
+        "KINDID INTEGER",
+        "CATEGORYID INTEGER",
+        "DATE DATE",
+        "VALUE FLOAT",
+        "COMMENTS VARCHAR(255)",
+        "FOREIGN KEY (KINDID) REFERENCES KIND(ID)",
+        "FOREIGN KEY (CATEGORYID) REFERENCES CATEGORY(ID)"
+    ], None)
+}
+
+sql_connector.create_tables(tables)
+sql_connector.insert_default_kind_values()
+sql_connector.insert_default_category_values()
+
 
 # Create an instance of the menu
 menu = Menu()
