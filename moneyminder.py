@@ -2,6 +2,7 @@ import json
 import os
 from datetime import datetime
 import mysql.connector
+from prettytable import PrettyTable
 
 class DatabaseConfig:
     def __init__(self, config_file):
@@ -33,6 +34,7 @@ class DatabaseConfig:
         print("New configuration file created successfully.")
 
 class SqlConnector:
+    ''' Managing Sql Actions'''
     def __init__(self, host, user, password, database=None):
         self.host = host
         self.user = user
@@ -42,6 +44,7 @@ class SqlConnector:
         self.cursor = None
         
     def connect_to_database(self):
+        '''Connect to database'''
         try:
             self.connection = mysql.connector.connect(
                 host = self.host,
@@ -53,17 +56,20 @@ class SqlConnector:
             print("Connected to MySQL database successfully.")
         except mysql.connector.Error as mistake:
             print(f"Error: {mistake}")
-            
+
     def disconnect(self):
+        '''Disconnect from database'''
         if self.connection:
             self.connection.close()
             print("Disconnected from MySQL database.")
-            
+
     def create_tables(self, tables):
+        '''Create table'''
         for table_name, (columns, foreign_keys) in tables.items():
             self.create_table(table_name, columns, foreign_keys)
 
     def create_table(self, table_name, columns, foreign_keys=None):
+        '''Create table'''
         try:
             # Construct the CREATE TABLE statement with IF NOT EXISTS clause
             create_table_query = f"CREATE TABLE IF NOT EXISTS {table_name} ({', '.join(columns)}"
@@ -75,8 +81,9 @@ class SqlConnector:
             print(f"Table '{table_name}' created or already exists.")
         except mysql.connector.Error as error:
             print(f"Error: {error}")
-            
+
     def create_database(self, database_name):
+        '''Create the database'''
         try:
             # Execute the SQL query to create the database
             self.cursor.execute(f"CREATE DATABASE IF NOT EXISTS {database_name}")
@@ -84,8 +91,9 @@ class SqlConnector:
             self.cursor.close()
         except mysql.connector.Error as error:
             print(f"Error: {error}")
-            
+
     def insert_data(self, table_name, data):
+        ''' Insert Data to MySql'''
         try:
             # Construct the INSERT INTO statement
             columns = ', '.join(data.keys())
@@ -100,8 +108,9 @@ class SqlConnector:
             print(f"Data inserted into '{table_name}' successfully.")
         except mysql.connector.Error as error:
             print(f"Error: {error}")
-            
+
     def insert_default_kind_values(self):
+        '''Insert initial Data'''
         try:
             # Check if KIND table is empty
             self.cursor.execute("SELECT COUNT(*) FROM KIND")
@@ -130,6 +139,7 @@ class SqlConnector:
             print(f"Error: {error}")
 
     def insert_default_category_values(self):
+        '''Insert initial Data'''
         try:
             # Check if CATEGORY table is empty
             self.cursor.execute("SELECT COUNT(*) FROM CATEGORY")
@@ -161,33 +171,106 @@ class SqlConnector:
                 print("Default values already exist in 'CATEGORY' table.")
         except mysql.connector.Error as error:
             print(f"Error: {error}")
-            
+
+    def select_from_table(self, atribbutes, table_name, condition=None):
+        ''' Select From table'''
+        try:
+            query = f"SELECT {atribbutes} from {table_name}"
+            if condition:
+                query += f" WHERE {condition}"
+            self.cursor.execute(query)
+            return self.cursor.fetchall()
+        except mysql.connector.Error as error:
+            print(f"Error: {error}")
+            return None
+
 class Menu:
+    '''The Menu of App'''
     def __init__(self,cursor):
         self.running = True
         self.cursor = cursor # Store the cursror as an instance variable.
 
     def display_menu(self):
+        '''Main Menu'''
         print("Menu:")
         print("1. Add Transaction")
-        print("2. Configuration")
+        print("2. Reports")
+        print("3. Configuration")
         print("0. Exit")
 
     def handle_input(self):
+        '''Handle the input of Main Menu'''
         while self.running:
             self.display_menu()
             choice = input("Enter your choice: ")
 
             if choice == "1":
                 self.add_transaction()
-            elif choice == "2":
+            elif choice =="2":
+                self.submenu_reports()
+            elif choice == "3":
                 self.configure_submenu()
             elif choice == "0":
                 self.exit_program()
             else:
                 print("Invalid choice. Please try again.")
 
+    def submenu_reports(self):
+        ''' Submenu of Reports'''
+        submenu_running = True
+        while submenu_running:
+            print("Reports Submenu:")
+            print("1. Total Revenue")
+            print("2. Total Expenses")
+            print("3. Back to Main Menu")
+
+            submenu_choice = input("Enter your choice: ")
+
+            if submenu_choice == "1":
+                self.analytical_report(1)
+            elif submenu_choice == "2":
+                self.analytical_report(2)
+            elif submenu_choice == "3":
+                submenu_running = False
+            else:
+                print("Invalid choice. Please try again.")
+
+    def analytical_report(self, kind):
+        ''' Report for Revenues and Expenses Analytical'''
+        attributes_table = "ID,DATE,VALUE,COMMENTS"
+        conditions_table = f"KINDID={kind}"
+    
+        # Ask the user if they want to set a date range
+        set_date_range = input("Do you want to set a date range? (Y/N): ").upper()
+        if set_date_range == 'Y':
+            # Prompt the user to enter the date range
+            date_from = input("Enter the start date (YYYY-MM-DD): ")
+            date_to = input("Enter the end date (YYYY-MM-DD): ")
+            # Convert date strings to datetime objects
+            date_from_obj = datetime.strptime(date_from, '%Y-%m-%d')
+            date_to_obj = datetime.strptime(date_to, '%Y-%m-%d')
+            # Format the date range condition
+            date_condition = f"DATE BETWEEN '{date_from_obj.strftime('%Y-%m-%d')}' AND '{date_to_obj.strftime('%Y-%m-%d')}'"
+            # Add the date range condition to the query
+            conditions_table += f" AND {date_condition}"
+
+        entries = sql_connector.select_from_table(attributes_table, "TRANSACTIONS", conditions_table)
+
+    # Convert tuple to list, modify the date format, and convert back to tuple
+        modified_entries = [list(row) for row in entries]
+        for row in modified_entries:
+            row[1] = row[1].strftime('%d-%m-%Y')
+    
+        table = PrettyTable()
+        table.field_names = ["ID", "DATE", "VALUE", "COMMENTS"]
+        for row in modified_entries:
+            table.add_row(row)
+        print(table)
+
+
+
     def add_transaction(self):
+        ''' Add transaction, creating the insert statement values'''
         kind_choice= self.select_kind()
         category_choice = self.select_category(kind_choice)
         transaction_date= self.get_transaction_date()
@@ -206,14 +289,16 @@ class Menu:
 
 
     def get_comments(self):
+        ''' Comments for transaction'''
         while True:
             comments = input("Enter any comments (press Enter to skip): ")
             if comments.strip() == "":
                 return None  # Return None if the user skips entering comments
             else:
                 return comments  # Return the comments entered by the user
-        
-    def select_kind(self):    
+
+    def select_kind(self):
+        ''' Kind of transaction'''    
         print("Select Transaction Type:")
         try:
             self.cursor.execute("SELECT ID, DESCRIPTION FROM KIND")
@@ -226,6 +311,7 @@ class Menu:
             print(f"Error: {error}")
 
     def select_category(self, kind_choice):
+        '''Category of transaction'''
         print("Select Category Type:")
         try:
             self.cursor.execute(f"SELECT * FROM CATEGORY WHERE KINDID = {kind_choice}")
@@ -235,14 +321,16 @@ class Menu:
                 # Initialize a counter variable
                 counter = 1
                 for category in categories:
-                    print(f"{counter}. {category[1]}")  # Display the counter along with the category description
-                    category_mapping[counter] = category[0]  # Map the counter to the actual category ID
+                    # Display the counter along with the category description
+                    print(f"{counter}. {category[1]}")
+                    # Map the counter to the actual category ID
+                    category_mapping[counter] = category[0]  
                     counter += 1  # Increment the counter
             else:
                 print("No categories found for the selected kind.")
         except mysql.connector.Error as error:
             print(f"Error: {error}")
-    
+
         while True:
             category_choice_input = input("Enter your choice: ")
             try:
@@ -255,6 +343,7 @@ class Menu:
                 print("Invalid input. Please enter a number.")
 
     def transaction_value(self):
+        '''Value of transaction'''
         while True:
             value_str = input("Enter the value of the transaction (e.g., 12.34): ")
             try:
@@ -269,6 +358,7 @@ class Menu:
                 print("Please enter a valid number.")
 
     def get_transaction_date(self):
+        '''Date of transaction'''
         while True:
             date_str = input("Enter the date of the transaction (DD-MM-YYYY): ")
             try:
@@ -279,6 +369,7 @@ class Menu:
                 print("Please enter a date in the format DD-MM-YYYY.")
 
     def configure_submenu(self):
+        ''' Configure configuration file'''
         submenu_running = True
         while submenu_running:
             print("Configuration Submenu:")
@@ -298,6 +389,7 @@ class Menu:
                 print("Invalid choice. Please try again.")
 
     def view_configuration(self):
+        ''' View configuration file'''
         print("Current Configuration:")
         print(f"Host: {data['host']}")
         print(f"User: {data['user']}")
@@ -306,6 +398,7 @@ class Menu:
         input("Press Enter to go to Submenu...")
 
     def change_configuration(self):
+        ''' Change configuration file'''
         print("Enter new configuration:(If you want the old value Press Enter")
         new_host = input(f"Host [{data['host']}]: ") or data['host']
         new_user = input(f"User [{data['user']}]: ") or data['user']
@@ -325,13 +418,16 @@ class Menu:
         self.reload_configuration()
 
     def reload_configuration(self):
+        ''' Reload the changes of configuration file'''
         global data  # Declare data as global to update its value
         data = db_config.load_json()
 
     def exit_program(self):
+        '''Exit program'''
         print("Exiting program.")
+        sql_connector.cursor.close()
         self.running = False
-            
+
 
 configuration = "database_config.json"
 
